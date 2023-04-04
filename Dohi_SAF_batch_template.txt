@@ -1,0 +1,86 @@
+Nx := 512 *1
+Ny := 512 *1
+setgridsize(Nx, Ny, 2)
+c := 1e-9
+cz := 1e-9
+setcellsize(c, c, cz)
+SetPBC(8, 8, 0)
+
+defRegion(0, layer(0))
+defRegion(1, layer(1))
+
+// parametric sweep 
+Msat = $MSAT
+Dind = $DIND
+Ku1 = $KU
+anisU = vector(0, 0, 1) // PMA 
+alpha = 0.1
+Aex = $AEX
+
+RKKY := $RKKY
+scale := (RKKY * cz) / (2 * Aex.Average())
+ext_scaleExchange(0, 1, scale)
+
+B_ext = vector(0, 0, $BZ)
+
+tableadd(ext_bubblepos)
+tableadd(ext_bubbledist)
+tableadd(Temp)
+tableAutosave(2e-10)
+
+m.setRegion(0, neelskyrmion(1, -1))
+m.setRegion(1, neelskyrmion(-1, 1)) //Neel type sky charge(Qs)=-1, core mag = 1
+/*
+minimize()
+save(m)
+snapshot(m)
+TableSave()
+*/
+
+Temp = $TEMP
+ThermSeed(12345)
+SetSolver(6)  
+fixdt=0
+
+autosave(m, 2e-10)
+run(6e-9)
+snapshot(m)
+
+/*
+// SOT driven dynamics 
+alphaH := 0.25
+//SOTxi removed, no effect of field like torque 
+e := 1.6021766e-19
+d := 2e-9
+Ms := $MSAT
+hbar := 1.0545718e-34
+p := Constvector(0, -1, 0)
+J_SOT := abs(-JE) //should be tagged JE
+aj := Const(J_SOT * (hbar / 2. * alphaH / e / d / ms))
+dampinglike := Mul(aj, Cross(m, p))
+AddFieldTerm(dampinglike)
+AddEdensTerm(Mul(Const(-0.5), Dot(dampinglike, M_full)))
+//tableadd(dampinglike)
+//field like torque removed 
+autosave(m, 2e-10)
+tableAutosave(2e-10)
+run(2e-9)
+snapshot(m)
+
+
+//define constants and set slonczewksi parameters
+SOTxi := -2
+alphaH:= 0.25
+Pol= alphaH
+Lambda= 1
+Epsilonprime= alphaH /2 * SOTxi
+Fixedlayer= vector(0,-1,0) //p
+//define current
+je := JE
+J = vector(0,0,abs(-je))
+
+autosave(m, 2e-10)
+tableAutosave(2e-10)
+run(2e-9)
+snapshot(m)
+*/

@@ -1,0 +1,234 @@
+# MIF 2.1
+# MIF Example File: spinvalve-af.mif
+# Description: Spin wave guide of width modulated structure 
+#
+set pi [expr 4*atan(1.0)]
+set mu0 [expr 4*$pi*1e-7]
+
+set PI [expr {4*atan(1.)}]
+set RAD2DEG [expr {180.0/$PI}]
+set DEG2RAD [expr {1.0/$RAD2DEG}]
+set MU0 [expr {4*$PI*1e-7}]
+set mT2Am [expr {0.001/$MU0}]
+RandomSeed 100
+# note that Ms is in A/m
+Parameter Hamp 500.0   ;# Amplitude of the applied field, in mT
+Parameter GHz 3  ;# Frequency of applied field, in GHz
+set start_time 0e-9
+Parameter stop_time 9.99e-9
+Parameter TimeStep 2e-12
+Parameter Ms 840E3
+Parameter alpha 0.013
+
+Parameter region_width1   10e-9 ;# gap size, L , nm
+Parameter region_count   5;# N, no of periods
+Parameter regoin_excit 500e-9
+Parameter region_width2   10e-9 ;# duty cycle nm, region_width1+region_width2 = total period of a single feature
+
+Parameter y1 24e-9 ;# grating width, GW
+set y2 30e-9
+set xtot 1e-6
+set xmax [expr {($region_count*($region_width1+$region_width2))+$regoin_excit}]
+set ymax 30e-9
+Parameter zmax 10e-9 ;# thickness of the waveguide
+
+Parameter thick 10e-9 ;# not used
+Parameter xycellsize 5e-9
+Parameter zcellsize 10e-9
+
+set bias 1000 ;# DC bias field, in mT, later converted to A/m in code, as well as Hamp
+set phase 0 ;# 0 - in phase, 180 - out-of-phase
+set stage_number [expr {round(($stop_time)/$TimeStep) }]
+# Convert freq from GHz to natural frequency in rad/sec
+set freq [expr {$GHz *1e9*2*$PI}]
+set period [expr {1 / ($GHz *1e9) }] ;#in seconds
+
+
+# Use a Tcl for-loop to construct a string representing list of regions.
+# This string is imported into the Oxs_MultiAtlas Specify block to
+# define the regions.
+for {set i 0} {$i<$region_count} {incr i} {
+    set atlas_string1 [subst {Oxs_BoxAtlas {
+          xrange {[expr {($i*($region_width1+$region_width2))+$regoin_excit}] 
+                  [expr {($i*($region_width1+$region_width2))+$region_width1+$regoin_excit}]}
+          yrange { [expr {($y2 - $y1)/2}] [expr {$y1+($y2 - $y1)/2}] }
+          zrange {0 $zmax}
+          name   {region_[expr {($i*2)+1}]}
+     }}]
+     lappend regions_list1 "atlas" $atlas_string1
+}
+
+for {set j 0} {$j<$region_count} {incr j} {
+    set atlas_string2 [subst {Oxs_BoxAtlas {
+          xrange {[expr {($j*($region_width1+$region_width2))+$region_width1+$regoin_excit}] 
+                  [expr {($j*($region_width1+$region_width2))+$region_width1+$region_width2+$regoin_excit}]}
+          yrange {0 $y2}
+          zrange {0 $zmax}
+          name   {region_[expr {($j*2)+2}]}
+     }}]
+     lappend regions_list2 "atlas" $atlas_string2
+}
+
+Specify Oxs_MultiAtlas:atlas [subst {
+	atlas { Oxs_BoxAtlas {
+	name leftExcit
+	xrange {0e-9 $regoin_excit}
+	yrange {0e-9 $y2}
+	zrange {0e-9 $zmax}
+	} }
+  $regions_list1
+  $regions_list2
+  	atlas { Oxs_BoxAtlas {
+	name rightOut
+	xrange {$xmax $xtot}
+	yrange {0e-9 $y2}
+	zrange {0e-9 $zmax}
+    } }
+}]
+
+Specify Oxs_RectangularMesh:mesh [subst {
+  cellsize {$xycellsize $xycellsize $zcellsize}
+  atlas :atlas
+}]
+
+Specify Oxs_UniaxialAnisotropy {
+        K1  1e2
+        axis { Oxs_UniformVectorField {
+    norm 1
+    vector {0 0 1}
+  }  }
+}
+
+# Exchange is automatically 0 at locations where Ms=0.
+# Oxs_UniformExchange does not allow more general variation of A.  If
+# more control is needed, use Oxs_Exchange6Ngbr.
+Specify Oxs_UniformExchange {
+  A   13e-12
+}
+
+# Define an Oxs_AtlasVectorField object to define initial magnetization.
+for {set i 1} {$i<=$region_count} {incr i} {
+   set value_string [list 0 1 0]
+   lappend m0_value_list "region_$i" $value_string
+}
+Specify Oxs_AtlasVectorField:minit [subst {
+   atlas :atlas
+   norm 1.0
+   default_value {0 1 0}
+   values { $m0_value_list }
+}]
+
+# Applied Bias field 
+for {set i 1} {$i<=$region_count} {incr i} {
+   set value_string [list 0 0 $bias]
+   lappend bias_value_list "region_$i" $value_string
+}
+Specify Oxs_FixedZeeman:Bias [subst {
+  multiplier [expr {0.001/$mu0}]
+  field { Oxs_AtlasVectorField {
+    atlas :atlas
+    default_value {0. 0. 0.}
+    values {
+	 rightOut {0 0 $bias}
+	 leftExcit {0 0 $bias}
+	 $bias_value_list
+    }
+  }}
+}]
+
+if {$phase == 180} {
+
+# set BASENAME spinchain_out-of-phase
+
+# ################## Excitation field out-of-phase
+Specify Oxs_AtlasVectorField:excitation {
+  atlas :atlas
+    default_value {0. 0. 0.}
+    values {
+	leftExcit  {-1. 0. 0.}
+}}
+} else {
+
+# set BASENAME spinchain_in-phase
+# ################## Excitation field in-phase
+Specify Oxs_AtlasVectorField:excitation {
+  atlas :atlas
+    default_value {0. 0. 0.}
+    values {
+	leftExcit  {1. 0. 0.}
+}}
+}
+
+Specify Oxs_TransformZeeman:Excitation  [subst {
+  type general 
+  script SineField 
+  script_args total_time
+  field excitation
+}]
+
+Specify Oxs_Demag {}
+
+Specify Oxs_RungeKuttaEvolve [subst {
+  do_precess 1
+  alpha $alpha
+  start_dm 0.01 
+}]
+
+set BASENAME [format {MC_ext_Ms_%04.1f} \
+	[expr {$Ms*1E-3}]]
+
+Specify Oxs_TimeDriver [subst {
+ basename $BASENAME
+ evolver Oxs_RungeKuttaEvolve
+ stopping_time $TimeStep
+ stage_count $stage_number
+ checkpoint_cleanup done_only
+ vector_field_output_format {text %.17g} 
+ scalar_output_format %.12g
+ mesh :mesh
+ Ms  { Oxs_AtlasScalarField {
+     atlas :atlas
+     default_value $Ms
+     values {
+		universe 0.0
+     }
+ }}
+ m0 :minit
+ normalize_aveM_output 1 
+}]
+
+proc SineField { total_time } {
+   global Hamp freq period MU0 start_time mT2Am
+   set AC_time [expr {$total_time - $start_time}]   
+   if {$total_time <= $start_time} {
+
+	set amp 0.0
+	
+   } else {
+	
+	set amp $Hamp
+	
+   }
+   
+   set H [expr {$amp*sin($freq*$AC_time)}]
+   set dH [expr {$amp*$freq*cos($freq*$AC_time)}]
+   
+   return [list  $H 0  0 \
+                 0 0   0 \
+                 0   0    0 \
+                 $dH 0 0 \
+                 0  0 0 \
+                 0 0 0]
+}
+
+# specifications for data outputs
+#Destination archive mmArchive
+#Schedule DataTable archive Stage 1
+#Destination datatab mmDataTable
+#Schedule DataTable datatab Stage 1
+Destination graph mmGraph
+Schedule DataTable graph Stage 1
+#Schedule Oxs_TimeDriver::Magnetization archive Stage 1
+#Schedule Oxs_TimeDriver::Magnetization archive Step 1
+Destination display mmDisp
+Schedule Oxs_TimeDriver::Magnetization display Stage 5
